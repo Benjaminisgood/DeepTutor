@@ -47,7 +47,7 @@ MESSAGES = {
         "backend": "Backend",
         "frontend": "Frontend",
         "config_source": "Config source: {source}",
-        "npm_missing": "npm not found. Run `python scripts/start_tour.py` first.",
+        "npm_missing": "npm not found and local Next.js fallback is unavailable. Install Node.js/npm, then run `cd web && npm install`.",
         "port_conflict": "{name} port {port} is already in use.",
         "port_owner": "owner: {command} (PID {pid})",
         "port_owner_unknown": "owner: unknown process",
@@ -73,7 +73,7 @@ MESSAGES = {
         "backend": "后端",
         "frontend": "前端",
         "config_source": "配置来源：{source}",
-        "npm_missing": "未找到 npm。请先运行 `python scripts/start_tour.py`。",
+        "npm_missing": "未找到 npm，且本地 Next.js 备用启动方式不可用。请先安装 Node.js/npm，然后运行 `cd web && npm install`。",
         "port_conflict": "{name}端口 {port} 已被占用。",
         "port_owner": "占用进程：{command} (PID {pid})",
         "port_owner_unknown": "占用进程：未知",
@@ -122,6 +122,51 @@ def _t(language: str, key: str, **kwargs: Any) -> str:
     catalog = MESSAGES.get(language, MESSAGES["en"])
     template = catalog.get(key, MESSAGES["en"][key])
     return template.format(**kwargs)
+
+
+def _local_tool_path() -> str:
+    return str(PROJECT_ROOT / ".tools" / "bin")
+
+
+def _with_local_tools(env: dict[str, str]) -> dict[str, str]:
+    tool_path = _local_tool_path()
+    if Path(tool_path).exists():
+        current = env.get("PATH", "")
+        env["PATH"] = f"{tool_path}{os.pathsep}{current}" if current else tool_path
+    return env
+
+
+def _which_tool(name: str) -> str | None:
+    tool_path = _local_tool_path()
+    search_path = os.getenv("PATH", "")
+    if Path(tool_path).exists():
+        search_path = f"{tool_path}{os.pathsep}{search_path}" if search_path else tool_path
+    return shutil.which(name, path=search_path)
+
+
+def _resolve_frontend_command(frontend_port: int, language: str) -> list[str]:
+    """Return a frontend dev command using npm, or node directly as a fallback."""
+    npm = _which_tool("npm")
+    if npm:
+        return [npm, "run", "dev", "--", "--port", str(frontend_port)]
+
+    node = _which_tool("node")
+    next_bin = PROJECT_ROOT / "web" / "node_modules" / "next" / "dist" / "bin" / "next"
+    if node and next_bin.exists():
+        return [
+            node,
+            "--max-old-space-size=4096",
+            str(next_bin),
+            "dev",
+            "--webpack",
+            "--hostname",
+            "127.0.0.1",
+            "--port",
+            str(frontend_port),
+        ]
+
+    log_error(_t(language, "npm_missing"))
+    raise SystemExit(1)
 
 
 # ---------------------------------------------------------------------------
@@ -515,11 +560,6 @@ def main() -> None:
         or _root_env_value("AUTH_ENABLED", "false")
     ).lower() in {"1", "true", "yes", "on"}
 
-    npm = shutil.which("npm")
-    if not npm:
-        log_error(_t(language, "npm_missing"))
-        raise SystemExit(1)
-
     banner(
         "DeepTutor",
         [
@@ -543,13 +583,13 @@ def main() -> None:
         encoding="utf-8",
     )
 
-    backend_env = os.environ.copy()
+    backend_env = _with_local_tools(os.environ.copy())
     backend_env["BACKEND_PORT"] = str(backend_port)
     backend_env["FRONTEND_PORT"] = str(frontend_port)
     backend_env["PYTHONUNBUFFERED"] = "1"
     backend_env["PYTHONIOENCODING"] = "utf-8:replace"
 
-    frontend_env = os.environ.copy()
+    frontend_env = _with_local_tools(os.environ.copy())
     frontend_env["BACKEND_PORT"] = str(backend_port)
     frontend_env["FRONTEND_PORT"] = str(frontend_port)
     frontend_env["NEXT_PUBLIC_API_BASE"] = api_base
@@ -558,7 +598,7 @@ def main() -> None:
     frontend_env["PYTHONIOENCODING"] = "utf-8:replace"
 
     backend_cmd = [sys.executable, "-m", "deeptutor.api.run_server"]
-    frontend_cmd = [npm, "run", "dev", "--", "--port", str(frontend_port)]
+    frontend_cmd = _resolve_frontend_command(frontend_port, language)
 
     processes: list[ManagedProcess] = []
     frontend: ManagedProcess | None = None
