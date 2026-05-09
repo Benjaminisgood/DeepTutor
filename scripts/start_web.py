@@ -556,8 +556,7 @@ def main() -> None:
         return os.getenv(key, default)
 
     auth_enabled = (
-        _root_env_value("NEXT_PUBLIC_AUTH_ENABLED")
-        or _root_env_value("AUTH_ENABLED", "false")
+        _root_env_value("NEXT_PUBLIC_AUTH_ENABLED") or _root_env_value("AUTH_ENABLED", "false")
     ).lower() in {"1", "true", "yes", "on"}
 
     banner(
