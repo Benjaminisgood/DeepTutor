@@ -20,8 +20,8 @@ export const API_BASE_URL =
   })();
 
 // Hostnames that always refer to the local machine. When the build-time base
-// URL points to one of these, but the page is opened from a non-local origin,
-// we rewrite the hostname so requests reach the actual server.
+// URL points to one of these, we mirror the page host so localhost/127.0.0.1
+// do not split cookies, CORS state, or developer tooling.
 const LOOPBACK_HOSTS = new Set([
   "localhost",
   "127.0.0.1",
@@ -36,15 +36,17 @@ function isLoopbackHost(host: string): boolean {
   return LOOPBACK_HOSTS.has(host.toLowerCase());
 }
 
+function toUrlHostname(host: string): string {
+  return host.includes(":") && !host.startsWith("[") ? `[${host}]` : host;
+}
+
 /**
  * Resolve the effective API base URL at runtime.
  *
  * NEXT_PUBLIC_API_BASE is a build-time constant that is typically set to
- * http://localhost:<port>.  When another machine on the LAN opens the app that
- * constant still points at "localhost", which the remote browser resolves to
- * its *own* loopback address instead of the server.  We detect this situation
- * and swap the hostname for window.location.hostname so the request reaches
- * the actual server regardless of which machine opened the page.
+ * http://localhost:<port>.  When the page is opened through another hostname
+ * (127.0.0.1 locally, or a LAN address remotely), we swap the API hostname for
+ * window.location.hostname so requests use the same host the user opened.
  *
  * The full path/search is preserved (so deployments behind a reverse proxy
  * like `http://localhost:8001/api` continue to work after the rewrite).
@@ -55,9 +57,16 @@ export function resolveBase(): string {
   try {
     const url = new URL(base);
     const clientHost = window.location.hostname;
-    if (isLoopbackHost(url.hostname) && !isLoopbackHost(clientHost)) {
-      url.hostname = clientHost;
-      if (!warnedAboutHostSwap) {
+    const apiHostIsLoopback = isLoopbackHost(url.hostname);
+    const clientHostIsLoopback = isLoopbackHost(clientHost);
+    const shouldMirrorClientHost =
+      apiHostIsLoopback &&
+      (!clientHostIsLoopback ||
+        url.hostname.toLowerCase() !== clientHost.toLowerCase());
+
+    if (shouldMirrorClientHost) {
+      url.hostname = toUrlHostname(clientHost);
+      if (!clientHostIsLoopback && !warnedAboutHostSwap) {
         warnedAboutHostSwap = true;
         console.warn(
           `[api] NEXT_PUBLIC_API_BASE points to "${base}" but the page is served from "${clientHost}"; ` +

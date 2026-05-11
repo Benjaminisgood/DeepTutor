@@ -40,10 +40,16 @@ test("resolveBase rewrites loopback hostname to remote LAN host and preserves pa
   assert.equal(resolveBase(), "http://192.168.1.10:8001/api");
 });
 
-test("resolveBase treats IPv6 loopback as loopback (no swap when client is also ::1)", async () => {
+test("resolveBase mirrors 127.0.0.1 when the page uses that loopback alias", async () => {
+  const { resolveBase } = await loadApiModule();
+  setWindow("127.0.0.1");
+  assert.equal(resolveBase(), "http://127.0.0.1:8001/api");
+});
+
+test("resolveBase mirrors IPv6 loopback when the page uses that loopback alias", async () => {
   const { resolveBase } = await loadApiModule();
   setWindow("::1");
-  assert.equal(resolveBase(), "http://localhost:8001/api");
+  assert.equal(resolveBase(), "http://[::1]:8001/api");
 });
 
 test("apiUrl composes correctly after rewrite, without losing the base path", async () => {
@@ -64,5 +70,5 @@ test("wsUrl converts http to ws and respects rewritten host", async () => {
 test("wsUrl keeps original loopback when client is also loopback", async () => {
   const { wsUrl } = await loadApiModule();
   setWindow("127.0.0.1");
-  assert.equal(wsUrl("/api/v1/ws"), "ws://localhost:8001/api/api/v1/ws");
+  assert.equal(wsUrl("/api/v1/ws"), "ws://127.0.0.1:8001/api/api/v1/ws");
 });

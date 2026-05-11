@@ -108,6 +108,8 @@ const nextConfig = {
     position: "bottom-right",
   },
 
+  allowedDevOrigins: ["127.0.0.1"],
+
   // Transpile mermaid and related packages for proper ESM handling
   transpilePackages: ["mermaid"],
 
